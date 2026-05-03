@@ -10,6 +10,7 @@ import statsmodels.api as sm # Array-based interface
 import statsmodels.formula.api as smf
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from statsmodels.multivariate.manova import MANOVA
 
 #import seaborn as sns
 #import matplotlib.pyplot as plt
@@ -119,50 +120,118 @@ for g in g_cols:
         print(f"{g} vs {surr}: {corr_val}")
 
 #Simple regression
-X3 = pd.DataFrame(redline_full["holc_grade_X"])
-X3["homeownership"] = X3["homeownership"].map({"A": 4, "B": 3, "C": 2, "D": 1})
-X3 = pd.get_dummies(X3, drop_first=True)
-X3 = X3.apply(pd.to_numeric, errors="coerce")
+# --- HOLC grade (numeric) ---
+X3 = redline_full[["holc_grade_x"]].copy()
+X3["holc_grade_x"] = X3["holc_grade_x"].map({"A": 4, "B": 3, "C": 2, "D": 1})
 X3 = sm.add_constant(X3)
-yw = pd.DataFrame(redline_full["pct_white"])
-yb = pd.DataFrame(redline_full["pct_black"])
-yh = pd.DataFrame(redline_full["pct_hisp"])
-ya = pd.DataFrame(redline_full["pct_asian"])
-yo = pd.DataFrame(redline_full["pct_other"])
-y = np.c_(yw, yb, yh, ya, yo)
 
-x2w= pd.DataFrame(redline_full["surr_area_pct_white"])
-x2b= pd.DataFrame(redline_full["surr_area_pct_black"])
-x2h= pd.DataFrame(redline_full["surr_area_pct_hisp"])
-x2a= pd.DataFrame(redline_full["surr_area_pct_asian"])
-x2o= pd.DataFrame(redline_full["surr_area_pct_other"])
-x_surr = np.c_(x2w, x2b, x2h, x2a, x2o)
+# --- surrounding percentages ---
+x_surr = redline_full[
+    ["surr_area_pct_white","surr_area_pct_black","surr_area_pct_hisp",
+     "surr_area_pct_asian","surr_area_pct_other"]
+].copy()
 x_surr = sm.add_constant(x_surr)
 
-xavg = pd.DataFrame(redline_full["avg_G"])
-xmed = pd.DataFrame(redline_full["median_G"])
-xten = pd.DataFrame(redline_full["decile_10_G"])
-xquart = pd.DataFrame(redline_full["quartile_25_G"])
-xperc = np.c_(xavg, xmed, xten, xquart)
+# --- G metrics ---
+xperc = redline_full[
+    ["avg_G","median_G","decile_10_G","quartile_25_G"]
+].copy()
 xperc = sm.add_constant(xperc)
 
-model_grade = sm.OLS(y, X3).fit()
-model_surr = sm.OLS(y, x_surr).fit()
-model_perc = sm.OLS(y, xperc).fit()
+y_cols = ["pct_white","pct_black","pct_hisp","pct_asian","pct_other"]
+Y = redline_full[y_cols]
+for col in y_cols:
+    y = redline_full[col]
+    
+    print(f"\n===== Dependent variable: {col} =====")
+    
+    model_grade = sm.OLS(y, X3).fit()
+    print("\n-- Grade model --")
+    print(model_grade.summary())
+    
+    model_surr = sm.OLS(y, x_surr).fit()
+    print("\n-- Surrounding model --")
+    print(model_surr.summary())
+    
+    model_perc = sm.OLS(y, xperc).fit()
+    print("\n-- G metrics model --")
+    print(model_perc.summary())
 
-print(model_grade.summary())
-print(model_surr.summary())
-print(model_perc.summary())
+#multiple regression - check over this
 
+formula = "pct_white + pct_black + pct_hisp + pct_asian + pct_other ~ holc_grade_x + surr_area_pct_white + surr_area_pct_black + surr_area_pct_hisp + surr_area_pct_asian + surr_area_pct_other + avg_G + median_G + decile_10_G + quartile_25_G"
 
-#multiple regression
-xcomb = np.c_(X3 + x_surr + xperc)
-xcomb = sm.add_constant(xcomb)
-model_mult = sm.OLS(y, xcomb).fit()
-print(model_mult.summary())
+model = MANOVA.from_formula(formula, data=redline_full)
+print(model.mv_test())
 
 # Graph 
+plt.style.use('classic')
+# race vs HOLC grade
+pct_cols = ["pct_white", "pct_black", "pct_hisp", "pct_asian", "pct_other"]
+g_cols = ["avg_G", "median_G", "decile_10_G", "quartile_25_G"]
+surr_cols = [
+    "surr_area_pct_white",
+    "surr_area_pct_black",
+    "surr_area_pct_hisp",
+    "surr_area_pct_asian",
+    "surr_area_pct_other"
+]
 
 
+for grade in ["A", "B", "C", "D"]:
+    indicator = (redline_full["holc_grade_x"] == grade).astype(int)
     
+    # jitter to avoid vertical stacking
+    x = indicator + np.random.normal(0, 0.02, size=len(indicator))
+    
+    for col in pct_cols + g_cols:
+        plt.figure()
+        plt.scatter(x, redline_full[col])
+        plt.xlabel(f"{grade} indicator (jittered)")
+        plt.ylabel(col)
+        plt.title(f"{col} vs HOLC Grade {grade}")
+        plt.show()
 
+# race vs surrounding area
+for surr in surr_cols:
+    for pct in pct_cols:
+        plt.figure()
+        plt.scatter(redline_full[surr], redline_full[pct])
+        plt.xlabel(surr)
+        plt.ylabel(pct)
+        plt.title(f"{pct} vs {surr}")
+        plt.show()    
+
+# race vs 2020 percentile
+g_cols = ["avg_G", "median_G", "decile_10_G", "quartile_25_G"]
+pct_cols = ["pct_white", "pct_black", "pct_hisp", "pct_asian", "pct_other"]
+
+for g in g_cols:
+    for pct in pct_cols:
+        plt.figure()
+        plt.scatter(redline_full[pct], redline_full[g])
+        plt.xlabel(pct)
+        plt.ylabel(g)
+        plt.title(f"{g} vs {pct}")
+        plt.show()
+
+# G metrics vs surrounding %
+
+for g in g_cols:
+    for surr in surr_cols:
+        plt.figure()
+        plt.scatter(redline_full[surr], redline_full[g])
+        plt.xlabel(surr)
+        plt.ylabel(g)
+        plt.title(f"{g} vs {surr}")
+        plt.show()
+
+for g in g_cols:
+    for surr in surr_cols:
+        for pct in pct_cols:
+            plt.figure()
+            plt.scatter(redline_full[surr], redline_full[g], redline_full[pct])
+            plt.xlabel(surr, g)
+            plt.ylabel(pct)
+            plt.title(f"{surr, g} vs {pct}")
+            plt.show()
